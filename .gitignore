@@ -1,3 +1,4 @@
 env/
 *.nc
+*.ipynb*
 Data/Input_data/open_data.py
