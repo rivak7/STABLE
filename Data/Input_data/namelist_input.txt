@@ -10,7 +10,7 @@ min_struct_area 500000
 use_max_area 0
 max_struct_area 4000000
 n_days_before 15
-asymmetrical_LATmin 2
+asymmetrical_LATmin 1
 omega_hybrid_method 1
 GHGN_condition 1
 lat_polar_circle 75
