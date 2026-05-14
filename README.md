@@ -1,4 +1,7 @@
 # STABLE: SubTropical Atmospheric ridge and BLocking Events
+
+The tracking outputs are available at <https://orca.atmos.washington.edu/~bkerns/rishabh/blocking_climatology/tracking/>. The most recent run in `/Output_data/` uses the same `namelist_input.txt` input parameters as provided in this repo. 
+
 (STABLE has been renamed from a previous version, from BLOCS)
 
 An open-source and user-friendly Python algorithm for detecting and tracking atmospheric blockings and subtropical ridge obstruction events.
