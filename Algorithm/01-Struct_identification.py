@@ -16,6 +16,7 @@ from scipy.ndimage import label, binary_dilation
 import pickle
 from scipy.signal import savgol_filter
 import pandas as pd
+import os
 
 #### Import namelist to be used with the initiaization variables
 namelist_input = pd.read_csv('../Data/Input_data/namelist_input.txt', sep=' ', header=0)
@@ -39,7 +40,7 @@ if use_max_area == 0:
     max_struct_area = min_struct_area*10**5                            # Consider max area as very large number if term is not consider
 
 n_days_before = int(get_namelist_var('n_days_before'))                 # Number of days to be captured to compute LATmin
-horizontal_LATmin = int(get_namelist_var('asymmetrical_LATmin'))       # 1 - makes the computed LATmin be the same as Sousa et al., 2021; 2 - makes the new moving LATmin based on data from the last n_days_before
+horizontal_LATmin = int(get_namelist_var('asymmetrical_LATmin'))       # 1 - Sousa et al. fixed LATmin; 2 - STABLE moving LATmin; 3 - equatorial-contour LATmin; 4 - highest-global-contour LATmin
 omega_hybrid_method = int(get_namelist_var('omega_hybrid_method'))     # 1 - Simple distinction between omega and hybrid as described in Sousa et al. (2021), 2 - New distinction method with hybrids in mixed systems
 consider_polar = int(get_namelist_var('GHGN_condition'))               # 1 - Consider regions poleward of 90-delta as Sousa et al. (2021), 2 - Consider regions poleward of 90-delta, 3 - Do not consider regions poleward of 90-delta
 lat_polar_circle = float(get_namelist_var('lat_polar_circle'))         # Latitude (decimal) of the polar circle  to be considered
@@ -84,6 +85,51 @@ def find_nearest(array, value, which):
         return array[idx]
     elif which == 'index':
         return idx
+
+
+#%%% 1.4. Open Z500 input data with optional global fallback
+# The standard STABLE input filename includes the hemisphere:
+#   Z500_[year_i]_[year_f]_[region]_[data_type].nc
+# For equatorial-contour LATmin, it is useful to also have a full-global file:
+#   Z500_[year_i]_[year_f]_[data_type].nc
+# If the regional file is missing but the global file exists, this helper slices
+# the global file to the requested hemisphere for the main STABLE analysis.
+def subset_dataset_to_region(ds, region):
+    if 'latitude' not in ds.coords:
+        raise ValueError("Expected a 'latitude' coordinate in the Z500 input file.")
+
+    lat_values = ds.latitude.values
+    if region == 'NH':
+        if lat_values[0] > lat_values[-1]:
+            return ds.sel(latitude=slice(90, 0))
+        return ds.sel(latitude=slice(0, 90))
+    elif region == 'SH':
+        if lat_values[0] > lat_values[-1]:
+            return ds.sel(latitude=slice(0, -90))
+        return ds.sel(latitude=slice(-90, 0))
+    else:
+        return ds
+
+
+def open_z500_input_data():
+    input_dir = '../Data/Input_data'
+    regional_path = os.path.join(input_dir, f'Z500_{year_file_i}_{year_file_f}_{region}_{data_type}.nc')
+    global_path = os.path.join(input_dir, f'Z500_{year_file_i}_{year_file_f}_{data_type}.nc')
+
+    global_ds = xr.open_dataset(global_path) if os.path.exists(global_path) else None
+
+    if os.path.exists(regional_path):
+        ds = xr.open_dataset(regional_path)
+    elif global_ds is not None:
+        ds = subset_dataset_to_region(global_ds, region)
+    else:
+        raise FileNotFoundError(
+            'Could not find Z500 input file. Tried:\n'
+            f'  {regional_path}\n'
+            f'  {global_path}'
+        )
+
+    return ds, global_ds
 
 #%%% 1.4. Function to clean holes in the data
 def clean_holes(array, which):
@@ -251,18 +297,212 @@ def compute_moving_LATmin(day_n):
     return LATarray_moving, mean_val
 
 
+#%%% 1.9. Equatorial-contour LATmin method
+# Uses the prior n_days_before running-mean Z500 field. The contour threshold is
+# the minimum Z500 in the equatorial band (5S-5N) rounded down to the next
+# lower standard 600-unit contour. If only hemispheric input is available, the
+# equatorial band is necessarily one-sided (e.g. 0-5N for NH input).
+def compute_equatorial_contour_LATmin(day_n):
+    data_for_mean = original_array[day_n-n_days_before:day_n]
+    data_in_day = np.average(data_for_mean, axis=0)
+
+    lon2d, lat2d = np.meshgrid(lon, lat)
+
+    min_equatorial_z = np.nanmin(data_in_day[np.abs(lat2d) <= 5.0])
+
+    # Brandon's original code used 600 in raw ERA5 geopotential units.
+    # The STABLE input uses geopotential height in meters,
+    # so convert 600 m^2/s^2 to geopotential-height meters (a near-equivalent would be contour_step = 60.0).
+    contour_step = 600.0 / 9.80665
+    min_equatorial_z_std = np.floor(min_equatorial_z / contour_step) * contour_step
+
+    data_masked = np.array(data_in_day, copy=True)
+    data_masked[data_masked < min_equatorial_z_std] = np.nan
+
+    new_data_in_day = clean_holes(data_masked, 'hole')
+
+    LATarray_moving = []
+    for i in range(np.shape(new_data_in_day)[1]):
+        where_data = np.where(~np.isnan(new_data_in_day[:, i]))[0]
+
+        if len(where_data) == 0:
+            LATarray_moving.append(lat[-1])
+            continue
+
+        if len(where_data) > 1 and np.max(np.diff(where_data)) != 1:
+            where = np.where(np.diff(where_data) != 1)[0][0]
+            where_data = where_data[where+1:]
+
+        LATarray_moving.append(lat[where_data[0]])
+
+    # print(
+    #     "DEBUG equatorial LATmin:",
+    #     str(time[day_n])[:10],
+    #     "min_equatorial_z =", min_equatorial_z,
+    #     "std =", min_equatorial_z_std,
+    # )
+
+    return LATarray_moving, min_equatorial_z_std
+
+#%%% 1.10. Highest-global-contour LATmin method
+# Uses the prior n_days_before running-mean Z500 field. The selected threshold is
+# the highest standard contour level whose above-contour region contains a
+# connected component that spans every longitude and is attached to the
+# low-latitude/subtropical anchor band. LATmin is the poleward edge of that
+# selected globally spanning component.
+def _cyclic_global_spanning_component(mask, anchor_lat_min=0.0, anchor_lat_max=35.0,
+                                      anchor_min_lon_fraction=1.0):
+    """
+    Return the connected component of a Boolean mask that spans all longitudes
+    with cyclic longitude connectivity and intersects the anchor latitude band.
+
+    Parameters
+    ----------
+    mask : 2D bool array, shape (lat, lon)
+        True where the running-mean Z500 field exceeds the candidate contour.
+    anchor_lat_min, anchor_lat_max : float
+        Latitude band, in the STABLE hemisphere coordinate system, used only to
+        require connection to the low-latitude/subtropical reservoir.
+    anchor_min_lon_fraction : float
+        Minimum fraction of longitude columns in which the candidate component
+        must intersect the anchor band. The default 1.0 requires every longitude.
+    """
+    mask = np.asarray(mask, dtype=bool)
+    if mask.ndim != 2:
+        raise ValueError('mask must be a 2D latitude-longitude array')
+
+    nlat, nlon = mask.shape
+    if nlon == 0:
+        return None
+
+    # Tile in longitude so that structures crossing the antimeridian are
+    # connected during labeling. We analyze only the central copy afterward.
+    tiled = np.concatenate([mask, mask, mask], axis=1)
+    lbl, npatches = label(tiled, structure=np.ones((3, 3), dtype=int))
+    center = lbl[:, nlon:2*nlon]
+
+    anchor_rows = np.where((lat >= anchor_lat_min) & (lat <= anchor_lat_max))[0]
+    if len(anchor_rows) == 0:
+        raise ValueError(
+            f'No latitude grid points found in anchor band {anchor_lat_min}-{anchor_lat_max} degrees.'
+        )
+
+    candidate_labels = np.unique(center)
+    candidate_labels = candidate_labels[candidate_labels != 0]
+
+    best_component = None
+    best_area = -np.inf
+
+    for lab in candidate_labels:
+        comp = (center == lab)
+
+        # Require global longitude span in the central copy.
+        if not np.all(np.any(comp, axis=0)):
+            continue
+
+        # Require attachment to the low-latitude/subtropical anchor band. This
+        # prevents a disconnected high-latitude belt, should one occur, from
+        # defining LATmin.
+        anchor_by_lon = np.any(comp[anchor_rows, :], axis=0)
+        if np.mean(anchor_by_lon) < anchor_min_lon_fraction:
+            continue
+
+        comp_area = np.sum(comp)
+        if comp_area > best_area:
+            best_area = comp_area
+            best_component = comp
+
+    return best_component
+
+
+def compute_highest_global_contour_LATmin(day_n, contour_step=600.0/9.80665,
+                                          anchor_lat_min=0.0,
+                                          anchor_lat_max=35.0,
+                                          anchor_min_lon_fraction=1.0):
+    #### Aggregate main hemispheric data from the last n_days_before days.
+    data_for_mean = original_array[day_n-n_days_before:day_n]
+    data_in_day = np.average(data_for_mean, axis=0)
+
+    #### The highest possible globally anchored contour cannot exceed the
+    #### weakest longitude-column maximum within the anchor band.
+    anchor_rows = np.where((lat >= anchor_lat_min) & (lat <= anchor_lat_max))[0]
+    if len(anchor_rows) == 0:
+        raise ValueError(
+            f'No latitude grid points found in anchor band {anchor_lat_min}-{anchor_lat_max} degrees.'
+        )
+    anchor_field = data_in_day[anchor_rows, :]
+    upper_bound = np.nanmin(np.nanmax(anchor_field, axis=0))
+    lower_bound = np.nanmin(data_in_day)
+
+    start_level = np.floor(upper_bound/contour_step)*contour_step
+    end_level = np.floor(lower_bound/contour_step)*contour_step
+    candidate_levels = np.arange(start_level, end_level-contour_step, -contour_step)
+
+    selected_component = None
+    selected_level = np.nan
+
+    for level in candidate_levels:
+        candidate_mask = data_in_day >= level
+        comp = _cyclic_global_spanning_component(
+            candidate_mask,
+            anchor_lat_min=anchor_lat_min,
+            anchor_lat_max=anchor_lat_max,
+            anchor_min_lon_fraction=anchor_min_lon_fraction,
+        )
+        if comp is not None:
+            selected_component = comp
+            selected_level = level
+            break
+
+    if selected_component is None:
+        raise ValueError(
+            'Could not find a globally spanning, subtropically anchored Z500 contour. '
+            'Check the input field, contour_step, and anchor-band settings.'
+        )
+
+    #### Fill any enclosed holes in the selected component before extracting the
+    #### poleward edge. This ignores isolated closed contours at the same level
+    #### that are not part of the globally spanning component.
+    comp_as_nan = np.where(selected_component, 1.0, np.nan)
+    selected_filled = clean_holes(comp_as_nan, 'hole')
+    selected_bool = ~np.isnan(selected_filled)
+
+    LATarray_moving = []
+    for i in range(np.shape(selected_bool)[1]):
+        where_data = np.where(selected_bool[:, i])[0]
+        if len(where_data) == 0:
+            LATarray_moving.append(lat[-1])
+        else:
+            LATarray_moving.append(lat[where_data[0]])
+
+    return LATarray_moving, selected_level
+
+
 #%% 2. Open data
 #%%% 2.1. Open z array
-original_data = xr.open_dataset(f'../Data/Input_data/Z500_{year_file_i}_{year_file_f}_{region}_{data_type}.nc')
+original_data, latmin_reference_data = open_z500_input_data()
 
 #### Cut the subset if needed
 original_data = original_data.sel(time=slice(date_init, date_end))
+if latmin_reference_data is not None:
+    latmin_reference_data = latmin_reference_data.sel(time=slice(date_init, date_end))
 
 #### Invert the data array if needed and open the array
 if region == 'NH':
     original_array = original_data.z.values
 elif region == 'SH':
     original_array = original_data.z.values[:,::-1,:]
+
+#### Reference array for the equatorial-contour method's equatorial threshold. Prefer full-global data
+#### if available; otherwise use the main hemispheric input.
+if latmin_reference_data is not None:
+    latmin_reference_array = latmin_reference_data.z.values
+    latmin_reference_lat = latmin_reference_data.latitude.values
+    latmin_reference_lon = latmin_reference_data.longitude.values
+else:
+    latmin_reference_array = original_data.z.values
+    latmin_reference_lat = original_data.latitude.values
+    latmin_reference_lon = original_data.longitude.values
 
 #%%% 2.3. Lat and Lon and years
 if region == 'NH':
@@ -308,8 +548,13 @@ for day_n in tqdm(range(len(time))):
         if horizontal_LATmin == 1:
             LATmin_day, mean_val = compute_static_LATmin(day_n)
         elif horizontal_LATmin == 2:
-            # LATmin_day, mean_val = compute_moving_LATmin(day_n)
             LATmin_day, mean_val = compute_moving_LATmin(day_n)
+        elif horizontal_LATmin == 3:
+            LATmin_day, mean_val = compute_equatorial_contour_LATmin(day_n)
+        elif horizontal_LATmin == 4:
+            LATmin_day, mean_val = compute_highest_global_contour_LATmin(day_n)
+        else:
+            raise ValueError('asymmetrical_LATmin must be 1, 2, 3, or 4')
         if save_LATmin == 1:
             LATmin_arr.append(LATmin_day)
 
