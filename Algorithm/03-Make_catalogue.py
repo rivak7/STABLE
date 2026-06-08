@@ -12,7 +12,6 @@ import numpy as np
 import xarray as xr
 import pandas as pd
 import pickle
-import os
 from tqdm import tqdm
 from scipy import stats
 
@@ -65,40 +64,6 @@ def area_matrix(lon, lat, res):
     h = dist(lat_2d+res/2, lat_2d-res/2, lon_2d, lon_2d)
 
     return np.around((a+b)*h/2,1)
-
-
-#%%% 1.4. Open Z500 input data with optional global fallback
-def subset_dataset_to_region(ds, region):
-    if 'latitude' not in ds.coords:
-        raise ValueError("Expected a 'latitude' coordinate in the Z500 input file.")
-
-    lat_values = ds.latitude.values
-    if region == 'NH':
-        if lat_values[0] > lat_values[-1]:
-            return ds.sel(latitude=slice(90, 0))
-        return ds.sel(latitude=slice(0, 90))
-    elif region == 'SH':
-        if lat_values[0] > lat_values[-1]:
-            return ds.sel(latitude=slice(0, -90))
-        return ds.sel(latitude=slice(-90, 0))
-    else:
-        return ds
-
-
-def open_z500_input_data():
-    input_dir = '../Data/Input_data'
-    regional_path = os.path.join(input_dir, f'Z500_{year_file_i}_{year_file_f}_{region}_{data_type}.nc')
-    global_path = os.path.join(input_dir, f'Z500_{year_file_i}_{year_file_f}_{data_type}.nc')
-
-    if os.path.exists(regional_path):
-        return xr.open_dataset(regional_path)
-    if os.path.exists(global_path):
-        return subset_dataset_to_region(xr.open_dataset(global_path), region)
-    raise FileNotFoundError(
-        'Could not find Z500 input file. Tried:\n'
-        f'  {regional_path}\n'
-        f'  {global_path}'
-    )
 
 #%%% 1.4. Compute blocking index according to Wiedenmann et al. (2002) but extending 2D as in Davini et al. (2012)
 def Blocking_intensity_index(smask, data_in_day):
@@ -153,7 +118,7 @@ if save_type == 1:
     local_types_array = local_types.localtype.values
 
 #%%% 2.3. Open original z500 data
-original_data = open_z500_input_data()
+original_data = xr.open_dataset(f'../Data/Input_data/Z500_{year_file_i}_{year_file_f}_{region}_{data_type}.nc')
 
 #### Cut the subset if needed
 original_data = original_data.sel(time=slice(date_init, date_end))
