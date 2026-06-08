@@ -4,12 +4,12 @@
 import xarray as xr
 
 print('Merging ERA5 data files...')
-ds = xr.open_mfdataset('CDS/era5*.nc', combine='by_coords')
+ds = xr.open_mfdataset('CDS/era5_z500*.nc', combine='by_coords')
 ds = ds.chunk({'valid_time': 500})
 
 print('Subsetting and adjusting coordinates...')
 ds = ds.squeeze(['pressure_level'], drop=True)
-ds = ds.sel(latitude=slice(90, 0))
+# ds = ds.sel(latitude=slice(90, 0))
 ds = ds.rename({'valid_time': 'time'})
 
 ds = ds.assign_coords(
@@ -28,6 +28,6 @@ ds['z'].attrs['units'] = 'm'
 ds['z'].attrs['description'] = 'Geopotential height at 500 hPa'
 
 print('Saving merged dataset to netCDF...')
-ds.to_netcdf('Z500_1999_2026_NH_ERA5.nc', engine='h5netcdf')
+ds.to_netcdf('Z500_1979_2026_ERA5.nc', engine='h5netcdf')
 
 print('Done!')
