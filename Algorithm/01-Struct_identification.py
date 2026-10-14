@@ -46,6 +46,10 @@ consider_polar = int(get_namelist_var('GHGN_condition'))               # 1 - Con
 lat_polar_circle = float(get_namelist_var('lat_polar_circle'))         # Latitude (decimal) of the polar circle  to be considered
 save_LATmin = int(get_namelist_var('save_latmin'))                     # Save the LATmin values in netcdf
 save_localtype = int(get_namelist_var('get_type'))                     # Save local type masks
+if 'fixed_LATmin_classification' in namelist_input.variable.values:
+    fixed_LATmin_classification = int(get_namelist_var('fixed_LATmin_classification'))  # Only for asymmetrical_LATmin 3 or 4: 1 - Classify structures (Ridge/Omega/Rex) with the Sousa et al. fixed LATmin (method 1), as in method 1; 0 - Classify with the detection LATmin
+else:
+    fixed_LATmin_classification = 1
 
 #### Establish latitude delta of analysis for gradient computation
 delta = int(get_namelist_var('delta')) # degrees south or north
@@ -558,6 +562,12 @@ for day_n in tqdm(range(len(time))):
         if save_LATmin == 1:
             LATmin_arr.append(LATmin_day)
 
+        #### LATmin used for the structure-type thresholds (LATmin+15º). The detection LATmin above is still used for gradients, ridge pixels, and the subtropical-belt connection test
+        if fixed_LATmin_classification == 1 and horizontal_LATmin in (3, 4):
+            LATmin_class_day, _ = compute_static_LATmin(day_n)
+        else:
+            LATmin_class_day = LATmin_day
+
         #### Retrieve daily data
         data_in_day = original_array[day_n]
 
@@ -689,19 +699,22 @@ for day_n in tqdm(range(len(time))):
                 omega_area = int(np.sum(indv_omega*area))
 
                 #### Check distances to LATmin (as LATmin varies with lon) and the max latitudinal extension of structure
-                high_diff_latmin = []; low_diff_latmin = []
+                #### high_diff_latmin/low_diff_latmin use the classification LATmin; low_diff_latmin_detect uses the detection LATmin (subtropical-belt connection test)
+                high_diff_latmin = []; low_diff_latmin = []; low_diff_latmin_detect = []
                 highest_lat = []; lowest_lat = []
                 for i in range(np.shape(indv)[1]):
                     where_data = np.where(~np.isnan(indv[:,i]))[0]
                     if len(where_data) != 0:
-                        high_diff_latmin.append(lat[np.min(where_data)]-LATmin_day[i])
-                        low_diff_latmin.append(lat[np.max(where_data)]-LATmin_day[i])
+                        high_diff_latmin.append(lat[np.min(where_data)]-LATmin_class_day[i])
+                        low_diff_latmin.append(lat[np.max(where_data)]-LATmin_class_day[i])
+                        low_diff_latmin_detect.append(lat[np.max(where_data)]-LATmin_day[i])
 
                         highest_lat.append(lat[np.min(where_data)])
                         lowest_lat.append(lat[np.max(where_data)])
 
                 high_diff_latmin = np.max(high_diff_latmin)
                 low_diff_latmin = np.min(low_diff_latmin)
+                low_diff_latmin_detect = np.min(low_diff_latmin_detect)
 
                 max_ext = np.max(highest_lat)-np.min(lowest_lat)
 
@@ -723,7 +736,7 @@ for day_n in tqdm(range(len(time))):
                             struct_type = 'Omega block'     #### If not, then it is omega
 
                 else:
-                    if low_diff_latmin == res:          #### Hybrid if Rex and connected to the subtropical belt
+                    if low_diff_latmin_detect == res:   #### Hybrid if Rex and connected to the subtropical belt
                         struct_type = 'Rex block (hybrid)'
 
                     else:                               #### If none of the other conditions were valid, then all that remains is that the structure is Rex (either Pure, Polar, or hybrid between the two)
@@ -770,19 +783,22 @@ for day_n in tqdm(range(len(time))):
             indv[antim_iso_struct != num] = np.nan
 
             #### Check distances to LATmin (as LATmin varies with lon) and the max latitudinal extension of structure
-            high_diff_latmin = []; low_diff_latmin = []
+            #### high_diff_latmin/low_diff_latmin use the classification LATmin; low_diff_latmin_detect uses the detection LATmin (subtropical-belt connection test)
+            high_diff_latmin = []; low_diff_latmin = []; low_diff_latmin_detect = []
             highest_lat = []; lowest_lat = []
             for i in range(np.shape(indv)[1]):
                 where_data = np.where(~np.isnan(indv[:,i]))[0]
                 if len(where_data) != 0:
-                    high_diff_latmin.append(lat[np.min(where_data)]-LATmin_day[i])
-                    low_diff_latmin.append(lat[np.max(where_data)]-LATmin_day[i])
+                    high_diff_latmin.append(lat[np.min(where_data)]-LATmin_class_day[i])
+                    low_diff_latmin.append(lat[np.max(where_data)]-LATmin_class_day[i])
+                    low_diff_latmin_detect.append(lat[np.max(where_data)]-LATmin_day[i])
 
                     highest_lat.append(lat[np.min(where_data)])
                     lowest_lat.append(lat[np.max(where_data)])
 
             high_diff_latmin = np.max(high_diff_latmin)
             low_diff_latmin = np.min(low_diff_latmin)
+            low_diff_latmin_detect = np.min(low_diff_latmin_detect)
 
             max_ext = np.max(highest_lat)-np.min(lowest_lat)
 
@@ -827,7 +843,7 @@ for day_n in tqdm(range(len(time))):
                             struct_type = 'Omega block'     #### If not, then it is omega
 
                 else:
-                    if low_diff_latmin == res:          #### Hybrid if Rex and connected to the subtropical belt
+                    if low_diff_latmin_detect == res:   #### Hybrid if Rex and connected to the subtropical belt
                         struct_type = 'Rex block (hybrid)'
 
                     else:                               #### If none of the other conditions were valid, then all that remains is that the structure is Rex (either Pure, Polar, or hybrid between the two)
