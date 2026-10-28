@@ -775,6 +775,11 @@ for day_n in tqdm(range(len(time))):
                                     struct_array[:,:np.shape(struct_array)[1]//2],
                                     axis = 1)
 
+        #### Roll the LATmin arrays the same way as the fields so rolled column j is tested against the LATmin at original column (j + half) % nlon
+        antim_half = len(lon)//2
+        LATmin_day_r = np.roll(np.asarray(LATmin_day), -antim_half)
+        LATmin_class_day_r = np.roll(np.asarray(LATmin_class_day), -antim_half)
+
         antim_total_structures = np.max(antim_iso_struct)
 
         for num in range(1,antim_total_structures+1):
@@ -789,9 +794,9 @@ for day_n in tqdm(range(len(time))):
             for i in range(np.shape(indv)[1]):
                 where_data = np.where(~np.isnan(indv[:,i]))[0]
                 if len(where_data) != 0:
-                    high_diff_latmin.append(lat[np.min(where_data)]-LATmin_class_day[i])
-                    low_diff_latmin.append(lat[np.max(where_data)]-LATmin_class_day[i])
-                    low_diff_latmin_detect.append(lat[np.max(where_data)]-LATmin_day[i])
+                    high_diff_latmin.append(lat[np.min(where_data)]-LATmin_class_day_r[i])
+                    low_diff_latmin.append(lat[np.max(where_data)]-LATmin_class_day_r[i])
+                    low_diff_latmin_detect.append(lat[np.max(where_data)]-LATmin_day_r[i])
 
                     highest_lat.append(lat[np.min(where_data)])
                     lowest_lat.append(lat[np.max(where_data)])
