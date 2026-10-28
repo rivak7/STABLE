@@ -236,7 +236,7 @@ if catalogue_single == 0:
                     if region == 'NH':
                         struct_mask = np.where(dict_day['Struct_array'] == int(strct_id),1,0)
                     elif region == 'SH':
-                        struct_mask = np.where(dict_day['Struct_array'] == int(strct_id),1,0)[::-1,:]
+                        struct_mask = np.where(dict_day['Struct_array'] == int(strct_id),1,0)
                     area_start = np.sum(struct_mask*area)
     
                     data_in_day = original_array[day_n]
@@ -696,7 +696,7 @@ elif catalogue_single == 1:
                     if region == 'NH':
                         struct_mask = np.where(dict_day['Struct_array'] == int(strct_id),1,0)
                     elif region == 'SH':
-                        struct_mask = np.where(dict_day['Struct_array'] == int(strct_id),1,0)[::-1,:]
+                        struct_mask = np.where(dict_day['Struct_array'] == int(strct_id),1,0)
                     area_start = np.sum(struct_mask*area)
                     
                     data_in_day = original_array[day_n]
