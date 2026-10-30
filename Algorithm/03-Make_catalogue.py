@@ -393,8 +393,8 @@ if catalogue_single == 0:
                                                       axis = 1)
                             lon_temp_after = np.average(np.ma.masked_array(lons_anti, np.isnan(BI_anom_anti)),
                                                         weights=np.ma.masked_array(area*(BI_anom_anti+abs(np.nanmin(BI_anom_anti))), np.isnan(BI_anom_anti)))
-                            if lon_temp < -180:
-                                lon_temp_after = lon_temp + 360
+                            if lon_temp_after < -180:
+                                lon_temp_after = lon_temp_after + 360
                         else:
                             lon_temp_after = np.average(np.ma.masked_array(lons, np.isnan(BI_mask)),
                                                   weights=np.ma.masked_array(area*(BI_mask+abs(np.nanmin(BI_mask))), np.isnan(BI_mask)))
